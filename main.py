@@ -75,7 +75,7 @@ def send_slack_notification(recall):
         "blocks": [
             {
                 "type": "header",
-                "text": {"type": "plain_text", "text": "🚨 Ny tilbakekalling fra Mattilsynet", "emoji": True}
+                "text": {"type": "plain_text", "text": "🤢 Ny tilbakekalling fra Mattilsynet", "emoji": True}
             },
             {
                 "type": "section",

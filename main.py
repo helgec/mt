@@ -32,7 +32,6 @@ def save_recall(recall_id, title):
                      (recall_id, title, datetime.now().isoformat()))
 
 def fetch_recalls():
-    """Henter og parser HTML direkte fra Mattilsynets tilbakekallingsside."""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -42,7 +41,12 @@ def fetch_recalls():
     try:
         response = requests.get(TARGET_URL, headers=headers, timeout=10)
         response.raise_for_status()
+        
+        # Tving UTF-8-enkoding før HTML parses
+        response.encoding = 'utf-8'
+        
         soup = BeautifulSoup(response.text, 'html.parser')
+        # ... resten av funksjonen som før
 
         # Finn alle lenker som peker til enkeltsaker
         for link in soup.find_all('a', href=True):

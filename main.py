@@ -54,43 +54,49 @@ def fetch_data():
         logging.error(f"Feil ved henting av data fra Mattilsynet: {e}")
         return None
 
+def deref(val, flat, visited=None):
+    """Oppløser SvelteKit sine indeks-pekere til faktiske verdier."""
+    if visited is None:
+        visited = set()
+    if isinstance(val, int) and 0 <= val < len(flat):
+        if val in visited:
+            return None
+        visited.add(val)
+        return deref(flat[val], flat, visited)
+    if isinstance(val, dict):
+        return {k: deref(v, flat, visited.copy()) for k, v in val.items()}
+    if isinstance(val, list):
+        return [deref(v, flat, visited.copy()) for v in val]
+    return val
+
 def extract_recalls(data):
-    """
-    Trekker ut tilbakekallinger fra SvelteKit sin JSON-struktur.
-    VIKTIG: Denne funksjonen må du tilpasse basert på hvordan JSON-en din ser ut.
-    SvelteKit data.json ser ofte slik ut: {"type":"data", "nodes":[...]} og 
-    har data lagret i en array (ofte indexert).
-    
-    Dette er en eksempel-implementasjon som antar at du har funnet listen med 
-    objekter et sted i strukturen.
-    """
     recalls = []
-    
-    # --- TIPS FOR FEILSØKING ---
-    # Print ut 'data' her eller lagre den til fil midlertidig mens du utvikler 
-    # for å finne nøyaktig sti til tittel, URL/ID osv.
-    # print(json.dumps(data, indent=2))
-    
     try:
-        # Eksempel på navigering i en fiktiv (men vanlig) SvelteKit struktur:
-        # Ofte ligger dataene under data["nodes"][1]["data"] 
-        # Siden vi vet det er et flatet format, må vi ofte "hoppe" litt.
+        # Hent den flate matrisen fra SvelteKit sin node
+        flat = data['nodes'][1]['data']
         
-        # Her later vi som vi har fått ut en flat liste med saker som dette:
-        # [{"id": "sjømathuset", "tittel": "Sjømathuset AS tilbakekaller laks", "url": "/tilbakekallinger/sjomathuset"}]
-        
-        # BYTT UT DETTE med faktisk logikk for å finne arrayen med tilbakekallinger i 'data'
-        items_from_json = [] # Fyll denne med den faktiske listen fra 'data'
-        
-        for item in items_from_json:
-            recalls.append({
-                "id": item.get("url"), # URL fungerer ofte bra som unik ID
-                "tittel": item.get("title", "Ukjent tittel"),
-                "url": f"https://www.mattilsynet.no{item.get('url')}", # Legg til base-URL hvis den mangler
-                "kategori": item.get("category", "Ikke oppgitt")
-            })
-    except Exception as e:
-        logging.error(f"Klarte ikke parse JSON-strukturen: {e}")
+        # Søk gjennom matrisen etter objekter som representerer tilbakekallinger
+        for idx, item in enumerate(flat):
+            if isinstance(item, dict):
+                resolved = deref(item, flat)
+                
+                # Sjekk om dette objektet inneholder tittel og sti til en enkelt-tilbakekalling
+                title = resolved.get("title") or resolved.get("displayName")
+                path = resolved.get("_path") or resolved.get("url") or ""
+                
+                if title and isinstance(path, str) and "/tilbakekallinger/" in path:
+                    # Rydd opp i stien dersom den inneholder det interne mappenavnet
+                    clean_path = path.replace('/mattilsynet', '')
+                    full_url = f"https://www.mattilsynet.no{clean_path}"
+                    
+                    recalls.append({
+                        "id": clean_path,
+                        "tittel": title,
+                        "url": full_url,
+                        "kategori": resolved.get("topic", "Mat og drikke")
+                    })
+    except (KeyError, IndexError, TypeError) as e:
+        logging.error(f"Feil ved utpakking av SvelteKit-data: {e}")
         
     return recalls
 

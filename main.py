@@ -69,34 +69,46 @@ def deref(val, flat, visited=None):
         return [deref(v, flat, visited.copy()) for v in val]
     return val
 
+def resolve_val(val, flat_data):
+    """Henter ut den faktiske strengen eller verdien hvis val er en indeks-peker."""
+    if isinstance(val, int) and 0 <= val < len(flat_data):
+        target = flat_data[val]
+        if isinstance(target, int):
+            return resolve_val(target, flat_data)
+        return target
+    return val
+
 def extract_recalls(data):
     recalls = []
+    seen = set()
+    
     try:
-        # Hent den flate matrisen fra SvelteKit sin node
         flat = data['nodes'][1]['data']
         
-        # Søk gjennom matrisen etter objekter som representerer tilbakekallinger
-        for idx, item in enumerate(flat):
+        for item in flat:
             if isinstance(item, dict):
-                resolved = deref(item, flat)
+                # Slå opp faktiske verdier bak indeks-pekerne
+                raw_path = item.get("_path") or item.get("url") or item.get("href")
+                raw_title = item.get("title") or item.get("displayName")
                 
-                # Sjekk om dette objektet inneholder tittel og sti til en enkelt-tilbakekalling
-                title = resolved.get("title") or resolved.get("displayName")
-                path = resolved.get("_path") or resolved.get("url") or ""
+                path = resolve_val(raw_path, flat)
+                title = resolve_val(raw_title, flat)
                 
-                if title and isinstance(path, str) and "/tilbakekallinger/" in path:
-                    # Rydd opp i stien dersom den inneholder det interne mappenavnet
-                    clean_path = path.replace('/mattilsynet', '')
-                    full_url = f"https://www.mattilsynet.no{clean_path}"
-                    
-                    recalls.append({
-                        "id": clean_path,
-                        "tittel": title,
-                        "url": full_url,
-                        "kategori": resolved.get("topic", "Mat og drikke")
-                    })
-    except (KeyError, IndexError, TypeError) as e:
-        logging.error(f"Feil ved utpakking av SvelteKit-data: {e}")
+                if isinstance(path, str) and isinstance(title, str):
+                    # Sjekk at dette er en undersak og ikke selve hovedsiden
+                    if "tilbakekallinger/" in path and path.rstrip('/') not in ["/tilbakekallinger", "/mattilsynet/tilbakekallinger"]:
+                        clean_path = path.replace('/mattilsynet', '')
+                        
+                        if clean_path not in seen:
+                            seen.add(clean_path)
+                            recalls.append({
+                                "id": clean_path,
+                                "tittel": title.strip(),
+                                "url": f"https://www.mattilsynet.no{clean_path}",
+                                "kategori": "Mat og drikke"
+                            })
+    except Exception as e:
+        logging.error(f"Feil under parsing av SvelteKit-matrisen: {e}")
         
     return recalls
 

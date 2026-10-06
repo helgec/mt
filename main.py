@@ -1,13 +1,22 @@
 import os
 import sqlite3
 import logging
+import sys
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
+# Importer status-hjelperen
+sys.path.append("/home/nrknyheter")
+from status_helper import update_status
+
 # --- KONFIGURASJON ---
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_MATTILSYNET")
-DB_PATH = "recalls.db"
+
+# Sørg for at databasen lagres sammen med skriptet
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(SCRIPT_DIR, "recalls.db")
+
 BASE_URL = "https://www.mattilsynet.no"
 TARGET_URL = f"{BASE_URL}/tilbakekallinger"
 
@@ -46,7 +55,6 @@ def fetch_recalls():
         response.encoding = 'utf-8'
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        # ... resten av funksjonen som før
 
         # Finn alle lenker som peker til enkeltsaker
         for link in soup.find_all('a', href=True):
@@ -65,60 +73,7 @@ def fetch_recalls():
                         "kategori": "Mat og drikke"
                     })
     except requests.exceptions.RequestException as e:
-        logging.error(f"Feil ved henting fra Mattilsynet: {e}")
-
-    return recalls
-
-def send_slack_notification(recall):
-    """Sender Slack-varsel med Block Kit-oppsett."""
-    if not SLACK_WEBHOOK_URL:
-        logging.error("SLACK_WEBHOOK_MATTILSYNET miljøvariabel mangler!")
-        return
-
-    payload = {
-        "blocks": [
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": "🤢 Ny tilbakekalling fra Mattilsynet", "emoji": True}
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*{recall['tittel']}*\nKategori: {recall['kategori']}"}
-            },
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Les saken hos Mattilsynet", "emoji": True},
-                        "url": recall['url'],
-                        "action_id": "button-action"
-                    }
-                ]
-            }
-        ]
-    }
-
-    try:
-        res = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
-        res.raise_for_status()
-        logging.info(f"Sendte varsel til Slack om: {recall['tittel']}")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Feil ved sending til Slack: {e}")
-
-def main():
-    init_db()
-    recalls = fetch_recalls()
-
-    if not recalls:
-        logging.warning("Fant ingen tilbakekallinger på nettsiden. Sjekk om selectors må oppdateres.")
-        return
-
-    for recall in recalls:
-        if is_new_recall(recall['id']):
-            logging.info(f"Fant NY tilbakekalling: {recall['tittel']}")
-            send_slack_notification(recall)
-            save_recall(recall['id'], recall['tittel'])
-
-if __name__ == "__main__":
-    main()
+        err_msg = f"Feil ved henting fra Mattilsynet: {e}"
+        logging.error(err_msg)
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="ERROR", error_msg=err_msg)
+        return None  # Signaliserer at det opp

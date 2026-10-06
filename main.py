@@ -6,9 +6,6 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-from dotenv import load_dotenv
-load_dotenv()
-
 # Importer status-hjelperen
 sys.path.append("/home/nrknyheter")
 from status_helper import update_status
@@ -79,4 +76,92 @@ def fetch_recalls():
         err_msg = f"Feil ved henting fra Mattilsynet: {e}"
         logging.error(err_msg)
         update_status("mattilsynet", "Mattilsynet-overvåker", status="ERROR", error_msg=err_msg)
-        return None  # Signaliserer at det opp
+        return None  # Signaliserer at det oppsto en feil
+
+    return recalls
+
+def send_slack_notification(recall):
+    """Sender Slack-varsel med Block Kit-oppsett."""
+    if not SLACK_WEBHOOK_URL:
+        logging.error("SLACK_WEBHOOK_MATTILSYNET miljøvariabel mangler!")
+        return
+
+    payload = {
+        "blocks": [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "🤢 Ny tilbakekalling fra Mattilsynet", "emoji": True}
+            },
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{recall['tittel']}*\nKategori: {recall['kategori']}"}
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Les saken hos Mattilsynet", "emoji": True},
+                        "url": recall['url'],
+                        "action_id": "button-action"
+                    }
+                ]
+            }
+        ]
+    }
+
+    try:
+        res = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
+        res.raise_for_status()
+        logging.info(f"Sendte varsel til Slack om: {recall['tittel']}")
+    except requests.exceptions.RequestException as e:
+        err_msg = f"Feil ved sending til Slack: {e}"
+        logging.error(err_msg)
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="ERROR", error_msg=err_msg)
+        raise  # Kast videre så hovedløkken vet at den feilet
+
+def main():
+    if not SLACK_WEBHOOK_URL:
+        err_msg = "SLACK_WEBHOOK_MATTILSYNET miljøvariabel mangler i systemet!"
+        logging.error(err_msg)
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="ERROR", error_msg=err_msg)
+        sys.exit(1)
+
+    try:
+        init_db()
+    except Exception as e:
+        err_msg = f"Databasefeil: {e}"
+        logging.error(err_msg)
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="ERROR", error_msg=err_msg)
+        sys.exit(1)
+
+    recalls = fetch_recalls()
+
+    # fetch_recalls returnerer None ved nettverksfeil
+    if recalls is None:
+        sys.exit(1)
+
+    if not recalls:
+        logging.warning("Fant ingen tilbakekallinger på nettsiden. Sjekk om selectors må oppdateres.")
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="WARNING", error_msg="Fant 0 saker. Mulig endring på nettsiden.")
+        return
+
+    try:
+        for recall in recalls:
+            if is_new_recall(recall['id']):
+                logging.info(f"Fant NY tilbakekalling: {recall['tittel']}")
+                send_slack_notification(recall)
+                save_recall(recall['id'], recall['tittel'])
+        
+        # Hvis koden kommer hit uten feil, er alt i orden
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="OK")
+
+    except Exception as e:
+        err_msg = f"Uventet feil under behandling av saker: {e}"
+        logging.error(err_msg)
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="ERROR", error_msg=err_msg)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

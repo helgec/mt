@@ -6,6 +6,9 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # Importer status-hjelperen
 sys.path.append("/home/nrknyheter")
 from status_helper import update_status

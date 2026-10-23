@@ -13,6 +13,7 @@ from status_helper import update_status
 # --- KONFIGURASJON ---
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_MATTILSYNET")
 
+
 # Sørg for at databasen lagres sammen med skriptet
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(SCRIPT_DIR, "recalls.db")
@@ -34,11 +35,13 @@ def is_new_recall(recall_id):
         cursor.execute("SELECT id FROM recalls WHERE id=?", (recall_id,))
         return cursor.fetchone() is None
 
+
 def save_recall(recall_id, title):
     """Lagrer ny sak i databasen."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("INSERT INTO recalls (id, title, date_added) VALUES (?, ?, ?)",
                      (recall_id, title, datetime.now().isoformat()))
+
 
 def fetch_recalls():
     headers = {
@@ -50,10 +53,10 @@ def fetch_recalls():
     try:
         response = requests.get(TARGET_URL, headers=headers, timeout=10)
         response.raise_for_status()
-        
+
         # Tving UTF-8-enkoding før HTML parses
         response.encoding = 'utf-8'
-        
+
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Finn alle lenker som peker til enkeltsaker
@@ -63,7 +66,7 @@ def fetch_recalls():
 
             if '/tilbakekallinger/' in href and href.rstrip('/') not in ['/tilbakekallinger', '/mattilsynet/tilbakekallinger']:
                 clean_id = href.replace('/mattilsynet', '')
-                
+
                 if title and len(title) > 5 and clean_id not in seen_ids:
                     seen_ids.add(clean_id)
                     recalls.append({
@@ -141,6 +144,10 @@ def main():
     if recalls is None:
         sys.exit(1)
 
+    # Siste melding på dashbordet: nyeste sak som ligger på siden akkurat nå
+    # (antar at Mattilsynet lister nyeste tilbakekalling først)
+    siste_melding = recalls[0]["tittel"] if recalls else "Ingen tilbakekallinger funnet på siden"
+
     if not recalls:
         logging.warning("Fant ingen tilbakekallinger på nettsiden. Sjekk om selectors må oppdateres.")
         update_status("mattilsynet", "Mattilsynet-overvåker", status="WARNING", error_msg="Fant 0 saker. Mulig endring på nettsiden.")
@@ -152,9 +159,9 @@ def main():
                 logging.info(f"Fant NY tilbakekalling: {recall['tittel']}")
                 send_slack_notification(recall)
                 save_recall(recall['id'], recall['tittel'])
-        
+
         # Hvis koden kommer hit uten feil, er alt i orden
-        update_status("mattilsynet", "Mattilsynet-overvåker", status="OK")
+        update_status("mattilsynet", "Mattilsynet-overvåker", status="OK", last_message=siste_melding)
 
     except Exception as e:
         err_msg = f"Uventet feil under behandling av saker: {e}"
